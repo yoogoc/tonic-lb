@@ -10,4 +10,6 @@ pub enum Error {
     NotFoundPort(String),
     #[error("parse endpoint port error: {0}")]
     ParsePortError(String),
+    #[error("not match schema: {0}")]
+    NotMatchSchema(String),
 }
