@@ -6,7 +6,7 @@ A Grpc name resolver for [`tonic`](https://github.com/hyperium/tonic)
 
 ```rust
 let uri = "kubernetes://service-name:8080/".into;
-let channel = tonic_lb::default_channel(uri).await?;
+let channel = tonic_lb::kube::default_channel(uri).await?;
 let client = YourServiceClient::new(channel);
 ```
 
