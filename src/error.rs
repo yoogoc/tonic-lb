@@ -4,6 +4,8 @@ use thiserror::Error;
 pub enum Error {
     #[error("kube: {0}")]
     WrapKube(kube::Error),
+    #[error("kube client: {0}")]
+    WrapKubeClient(String),
     #[error("kube watcher: {0}")]
     WrapKubeWatcher(kube::runtime::watcher::Error),
     #[error("not found endpoint port: {0}")]
@@ -12,4 +14,6 @@ pub enum Error {
     ParsePortError(String),
     #[error("not match schema: {0}")]
     NotMatchSchema(String),
+    #[error("host is empty")]
+    HostIsEmpty,
 }

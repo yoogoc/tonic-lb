@@ -17,10 +17,8 @@ use crate::error::Error;
 
 pub struct TargetInfo {
     service_name: String,
-    service_namespace: String,
-    port: String,
-    resolve_by_port_name: bool,
-    use_first_port: bool,
+    service_namespace: Option<String>,
+    port: Option<String>,
 }
 
 const KUBE_SCHEMA: &str = "kubernetes";
@@ -32,8 +30,30 @@ impl TryFrom<Uri> for TargetInfo {
         if !matches!(uri.scheme_str(), Some(KUBE_SCHEMA) | None) {
             return Err(Error::NotMatchSchema(uri.scheme_str().unwrap().to_owned()));
         }
+        let host = uri.host().ok_or(Error::HostIsEmpty)?;
+        let (service, port) = if let Some(i) = host.chars().position(|c| c == ':') {
+            let port = &host[i + 1..];
+            (&host[..i], Some(port.to_string()))
+        } else {
+            (host, None)
+        };
 
-        todo!()
+        let parts: Vec<_> = service.split(".").collect();
+        if parts.len() == 1 {
+            Ok(Self {
+                service_name: host.to_string(),
+                service_namespace: None,
+                port,
+            })
+        } else if parts.len() >= 2 {
+            Ok(Self {
+                service_name: (&parts[0]).to_string(),
+                service_namespace: Some((&parts[1]).to_string()),
+                port,
+            })
+        } else {
+            unreachable!()
+        }
     }
 }
 
@@ -68,8 +88,26 @@ async fn watch(
     sender: Sender<Change<String, TonicEndpoint>>,
 ) -> Result<(), Error> {
     let target = &target;
-    let api = Api::<Endpoints>::namespaced(client, &target.service_namespace);
-    let old_endpoints = Mutex::new(None);
+    let api = if let Some(service_namespace) = &target.service_namespace {
+        Api::<Endpoints>::namespaced(client, service_namespace)
+    } else {
+        Api::<Endpoints>::default_namespaced(client)
+    };
+
+    let endpoints = api
+        .get(&target.service_name)
+        .await
+        .map_err(|err| Error::WrapKubeClient(err.to_string()))?;
+    let new_addresses = endpoints_to_addresses(&target, &endpoints)?;
+    join_all(new_addresses.into_iter().map(|address| {
+        sender.send(Change::Insert(
+            address.to_owned(),
+            TonicEndpoint::from_shared(address.to_owned()).unwrap(),
+        ))
+    }))
+    .await;
+
+    let old_endpoints = Mutex::new(endpoints);
 
     watcher::watcher(
         api,
@@ -81,12 +119,8 @@ async fn watch(
         match event {
             Event::Applied(ref endpoints) => {
                 let mut old_endpoints = old_endpoints.lock().await;
-                let old_addresses = if let Some(old_endpoints) = old_endpoints.take() {
-                    endpoints_to_addresses(&target, &old_endpoints)?
-                } else {
-                    HashSet::new()
-                };
-                let _ = old_endpoints.insert(endpoints.clone());
+                let old_addresses = endpoints_to_addresses(&target, &old_endpoints)?;
+                *old_endpoints = endpoints.clone();
                 drop(old_endpoints);
 
                 let new_addresses = endpoints_to_addresses(&target, &endpoints)?;
@@ -130,24 +164,20 @@ fn endpoints_to_addresses(
         for subset in subsets {
             if let Some(ports) = &subset.ports {
                 let addresses = subset.addresses.clone().unwrap_or_default();
-                let port = if target.use_first_port {
-                    Ok(ports[0].port)
-                } else if target.resolve_by_port_name {
-                    let port = ports
-                        .iter()
-                        .filter(|p| p.name.as_ref().is_some_and(|name| name.eq(&target.port)))
-                        .next()
-                        .ok_or(Error::NotFoundPort(target.port.to_string()));
-                    if let Ok(port) = port {
-                        Ok(port.port)
-                    } else {
-                        Err(Error::NotFoundPort((&target.port).to_owned()))
+                let port = match &target.port {
+                    Some(port) => {
+                        if let Ok(port) = port.parse::<i32>() {
+                            Ok(port)
+                        } else {
+                            Ok(ports
+                                .iter()
+                                .filter(|p| p.name.as_ref().is_some_and(|name| name.eq(port)))
+                                .next()
+                                .ok_or(Error::NotFoundPort(port.to_string()))?
+                                .port)
+                        }
                     }
-                } else {
-                    target
-                        .port
-                        .parse::<i32>()
-                        .map_err(|_err| Error::ParsePortError((&target.port).to_owned()))
+                    None => Ok(ports[0].port),
                 }?;
                 for address in addresses {
                     let host = format!("{}:{}", address.ip, port);
