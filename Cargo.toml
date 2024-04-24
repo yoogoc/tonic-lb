@@ -3,7 +3,10 @@ name = "tonic-lb"
 version = "0.0.1"
 edition = "2021"
 description = "A Grpc name resolver for tonic"
-license-file = "LICENSE"
+license = "MIT"
+homepage = "https://github.com/yoogoc/tonic-lb"
+repository = "https://github.com/yoogoc/tonic-lb"
+keywords = ["tonic", "loadbalance", "kube", "kubernetes"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
