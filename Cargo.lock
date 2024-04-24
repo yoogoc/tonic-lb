@@ -1618,7 +1618,7 @@ dependencies = [
 
 [[package]]
 name = "tonic-lb"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "anyhow",
  "futures",
